@@ -12,7 +12,9 @@ This service prioritizes durable, single-owner seat allocation under concurrent 
 - Retries with the same `(show, user, idempotency key)` and same canonical body return the original reservation. A changed body is rejected with `409 IDEMPOTENCY_KEY_REUSED`.
 - Money uses integer paise (`BIGINT` in PostgreSQL); reservation totals use checked integer multiplication.
 - Show counts are derived from persisted seat rows, so `available + held + confirmed = total` by construction. The current state machine does not use `HELD`.
-- User identity for reservations and cancellations comes from the bearer token, not JSON.
+- Reservations and cancellations use the `sub` claim from a signature- and expiry-validated JWT; JSON cannot choose the user identity.
+- The service issues one-hour HS256 JWTs from `POST /auth/login`. Accounts are stored with BCrypt password hashes; the application runs statelessly.
+- Authorization is role-based: admins create shows and read metrics; users and admins read shows and make reservation requests. Cancellation additionally verifies reservation ownership.
 
 ## Reservation Transaction
 
@@ -33,17 +35,17 @@ The user/show lock protects the count-plus-reserve decision across requests from
 
 ## API and Errors
 
-- `POST /shows`: admin bearer token; creates a show and its seats.
-- `GET /shows/{id}`: returns show metadata, seat states, and counts.
-- `POST /shows/{id}/reserve`: user bearer token, `Idempotency-Key`, and seat list.
-- `POST /reservations/{id}/cancel`: reservation owner only.
-- `GET /health/live`: process liveness, independent of the database.
-- `GET /health/ready`: database-backed readiness.
-- `GET /metrics`: Prometheus exposition.
+- `POST /auth/login`: validates username/password and issues a signed JWT; generic invalid-credential response.
+- `POST /shows`: ADMIN JWT required; creates a show and its seats.
+- `GET /shows/{id}`: USER or ADMIN JWT required; returns show metadata, seat states, and counts.
+- `POST /shows/{id}/reserve`: USER or ADMIN JWT, `Idempotency-Key`, and seat list; identity comes from JWT `sub`.
+- `POST /reservations/{id}/cancel`: USER or ADMIN JWT; the service enforces reservation ownership.
+- `GET /health/live` and `GET /health/ready`: unauthenticated process liveness and database-backed readiness.
+- `GET /metrics`: ADMIN JWT required; returns Prometheus exposition.
 
-New reservations return `201`, identical idempotent replays return `200`, seat/limit/idempotency conflicts return `409`, missing shows return `404`, invalid requests return `400`, unauthenticated requests return `401`, non-owner cancellation returns `403`, and database access failures return `503`. Error responses include a stable code, safe message, and `request_id`.
+New reservations return `201`, identical idempotent replays return `200`, seat/limit/idempotency conflicts return `409`, missing shows return `404`, invalid requests return `400`, unauthenticated or invalid-token requests return `401`, role or ownership failures return `403`, and database access failures return `503`. Error responses include a stable code, safe message, and `request_id`. Only login, health checks, and the static UI allow anonymous access; all business APIs are protected.
 
-The exercise authentication maps a bearer token directly to a user ID and compares the admin token from configuration. It is intentionally not a production identity system. Configure strong secrets before deployment.
+The assessment/demo account IDs and passwords are listed in `README.md`. They are seeded for evaluation convenience and must be replaced with managed identities and secrets before production use. The Render Blueprint generates `JWT_SECRET`; local development uses the fallback in `application.yml` unless overridden.
 
 ## Persistence and Migrations
 
@@ -53,10 +55,11 @@ Key constraints include unique seat numbers per show, unique idempotency keys pe
 
 ## Observability
 
-- `X-Request-ID` is accepted only when it matches a bounded safe character set; otherwise a UUID is generated. It is returned in the response and stored in logging MDC.
-- Reservation, decline-reason, cancellation, and idempotent-replay counters use bounded metric labels.
+- `X-Request-ID` is accepted only when it matches a bounded safe character set; otherwise a UUID is generated. It is returned in the response and included in structured JSON request logs with method, path, status, and duration. Headers and bodies are not logged.
+- `reservations_confirmed_total`, `reservations_declined_total` with bounded reason labels, `reservations_cancelled_total`, and `reservations_idempotent_replays_total` count outcomes. `seats_available` is an aggregate database-backed gauge over all shows.
 - Readiness checks PostgreSQL; liveness does not.
 - Database exceptions are logged with request correlation and returned as a generic `503` response.
+- Render logs are available through authenticated dashboard/CLI access, not publicly. No screen recording of a live burst is included.
 
 ## Local Verification
 
@@ -71,7 +74,10 @@ The Docker build runs Maven tests. Check health and metrics:
 ```sh
 curl http://localhost:8080/health/live
 curl http://localhost:8080/health/ready
-curl http://localhost:8080/metrics
+ADMIN_TOKEN=$(curl -fsS -X POST http://localhost:8080/auth/login \
+	-H 'Content-Type: application/json' \
+	-d '{"username":"admin01","password":"SeatAdmin-2026!01"}' | jq -er '.access_token')
+curl -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:8080/metrics
 ```
 
 Run the reproducible contention check:
@@ -80,15 +86,21 @@ Run the reproducible contention check:
 ./scripts/burst.sh http://localhost:8080
 ```
 
-The script verifies one winner for a hot seat, the same-user seat limit, simultaneous same-key retries, key mismatch, expected HTTP outcomes, and state reconciliation. The implementation has been run locally with 100 concurrent hot-seat requests, 10 concurrent requests from one limited user, and 10 simultaneous identical-key requests; all preserved the expected invariants with no 5xx/network failures. This is not evidence of a 20,000-request production run; scale tests against the target deployment remain outstanding.
+The script verifies one winner for a hot seat, the same-user seat limit, simultaneous same-key retries, key mismatch, missing/malformed auth and idempotency headers, multi-seat all-or-nothing behavior, token-derived identity, owner-only and repeated cancellation, canceled-key replay, a cancel/rebook race, expected HTTP outcomes, and state reconciliation. The expanded implementation has been run locally with 100 concurrent hot-seat requests and the additional edge cases; all verified outcomes preserved the invariants with no 5xx/network failures. This is not evidence of a 20,000-request production run; scale tests against the target deployment remain outstanding.
 
 ## Trade-offs and Follow-up
 
+- The JWT-enabled source revision was validated locally but has not been deployed to Render; the hosted service may still run the previous public-write revision until it is released.
 - Row locking favors correctness and simplicity; a single hot seat remains a throughput bottleneck.
+- The free Render database is temporary and expires on 2026-11-02; the live service is an assessment demo, not a durable production deployment.
 - Payment intent is not integrated. A real provider would need provider-side idempotency and a carefully defined transaction boundary.
-- Add integration tests for cancellation races and database failure behavior, tune transaction/request timeouts, and run larger bursts against a production-like database before deployment.
-- Replace exercise bearer tokens with verified JWT/OIDC identities, add rate limiting, TLS enforcement, structured JSON logging, dashboards, tracing, and alert rules before production use.
-- Deployment URL, repository URL, candidate name, and AI-use disclosure must be added by the submitter when known.
+- The Render-connected source is currently on the `seat-reservation-deploy` branch; the repository default `main` branch must be updated before evaluators can build from a default clone.
+- Run the 20,000-request burst against a production-like database, tune transaction/request timeouts, and add an automated database failure integration test before production use.
+- Replace seeded assessment accounts with managed identities, add token refresh/revocation and rate limiting, enforce production TLS and secret rotation, and add dashboards, tracing, and alert rules before production use.
+
+## AI Use
+
+GitHub Copilot in VS Code was used throughout implementation and review. It helped draft the React test console, Docker/Render configuration, load and burst scripts, API documentation, and code/tests for request handling, JWT authentication, and observability. The candidate supplied the assessment requirements, chose the deployment platform, and directed revisions to restore admin-only show creation and add role-based JWT access. Generated changes were reviewed and checked with Docker builds, focused tests, local concurrency/edge-case runs, and endpoint checks. A 20,000-request live test has not been run. The candidate should be prepared to explain and extend the locking, idempotency, and transaction design independently.
 
 ## Implementation References
 
@@ -97,3 +109,5 @@ The script verifies one winner for a hot seat, the same-user seat limit, simulta
 - [Show API and persistence](src/main/java/com/example/seatreservation/shows/ShowController.java)
 - [Database migrations](src/main/resources/db/migration)
 - [Concurrency burst script](scripts/burst.sh)
+- [Live service](https://seat-reservation-api-tv2k.onrender.com)
+- [Public source branch](https://github.com/KetanBhenwal/Concurrency-Optimizer/tree/seat-reservation-deploy)

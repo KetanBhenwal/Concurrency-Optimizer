@@ -9,10 +9,10 @@ import {
   CircleHelp,
   Clock3,
   Copy,
-  ExternalLink,
   HeartPulse,
   LoaderCircle,
   LockKeyhole,
+  LogOut,
   Plus,
   RotateCw,
   Send,
@@ -43,6 +43,8 @@ type Reservation = {
 };
 type ApiResult = { ok: boolean; status: number; data: unknown; requestId: string; duration: number };
 type EventItem = { label: string; status: number; requestId: string; at: string };
+type UserRole = 'ADMIN' | 'USER';
+type AuthSession = { accessToken: string; userId: string; role: UserRole };
 
 const starterSeats = Array.from({ length: 24 }, (_, index) => {
   const row = String.fromCharCode(65 + Math.floor(index / 8));
@@ -63,7 +65,11 @@ function formatPaise(paise: number) {
 
 function App() {
   const [apiBase, setApiBase] = useState(localStorage.getItem('seat-ui-api') ?? '');
-  const [userId, setUserId] = useState('user-01');
+  const [session, setSession] = useState<AuthSession | null>(null);
+  const [loginUsername, setLoginUsername] = useState('user01');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginBusy, setLoginBusy] = useState(false);
+  const [loginError, setLoginError] = useState('');
   const [showName, setShowName] = useState('Friday night');
   const [seatInput, setSeatInput] = useState(starterSeats);
   const [pricePaise, setPricePaise] = useState('25000');
@@ -94,10 +100,17 @@ function App() {
         ...init,
         headers: {
           'X-Request-ID': requestId,
+          ...(session ? { Authorization: `Bearer ${session.accessToken}` } : {}),
           ...(init.headers ?? {}),
         },
       });
       responseStatus = response.status;
+      if (response.status === 401 && session) {
+        setSession(null);
+        setShow(null);
+        setReservations([]);
+        setNotice('Session expired. Sign in again.');
+      }
       const contentType = response.headers.get('content-type') ?? '';
       data = contentType.includes('json') ? await response.json() : await response.text();
       const duration = Math.round(performance.now() - started);
@@ -120,6 +133,40 @@ function App() {
       setEvents((current) => [{ label: `${init.method ?? 'GET'} ${path}`, status: 0, requestId, at: new Date().toLocaleTimeString() }, ...current].slice(0, 60));
       return { ok: false, status: responseStatus, data, requestId, duration };
     }
+  }
+
+  async function login(event: React.FormEvent) {
+    event.preventDefault();
+    setLoginBusy(true);
+    setLoginError('');
+    const result = await callApi('/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: loginUsername.trim(), password: loginPassword }),
+    }, false);
+    const response = result.data as {
+      access_token?: unknown;
+      user_id?: unknown;
+      role?: unknown;
+      token_type?: unknown;
+    };
+    if (result.ok && typeof response.access_token === 'string' && typeof response.user_id === 'string'
+      && (response.role === 'ADMIN' || response.role === 'USER') && response.token_type === 'Bearer') {
+      setSession({ accessToken: response.access_token, userId: response.user_id, role: response.role });
+      setLoginPassword('');
+      setNotice(`Signed in as ${response.user_id} · ${response.role}`);
+    } else {
+      setLoginError('Invalid user ID or password.');
+    }
+    setLoginBusy(false);
+  }
+
+  function logout() {
+    setSession(null);
+    setShow(null);
+    setReservations([]);
+    setSelectedSeats([]);
+    setNotice('Signed out. Sign in to continue.');
   }
 
   async function refreshShow(id = showId, announce = true, inspect = true) {
@@ -171,13 +218,12 @@ function App() {
     setBusy(false);
   }
 
-  async function reserve(seats = parseSeats(reserveSeatsInput), key = idempotencyKey, user = userId, refreshAfter = true) {
+  async function reserve(seats = parseSeats(reserveSeatsInput), key = idempotencyKey, refreshAfter = true) {
     if (!showId.trim()) {
       setNotice('Load or create a show before reserving.');
       return null;
     }
     const headers: Record<string, string> = { 'Idempotency-Key': key, 'Content-Type': 'application/json' };
-    if (user.trim()) headers.Authorization = `Bearer ${user.trim()}`;
     const result = await callApi(`/shows/${encodeURIComponent(showId)}/reserve`, {
       method: 'POST',
       headers,
@@ -195,10 +241,8 @@ function App() {
     return result;
   }
 
-  async function cancelReservation(reservation: Reservation, user = userId) {
-    const headers: Record<string, string> = {};
-    if (user.trim()) headers.Authorization = `Bearer ${user.trim()}`;
-    const result = await callApi(`/reservations/${encodeURIComponent(reservation.reservation_id)}/cancel`, { method: 'POST', headers });
+  async function cancelReservation(reservation: Reservation) {
+    const result = await callApi(`/reservations/${encodeURIComponent(reservation.reservation_id)}/cancel`, { method: 'POST' });
     if (result.ok) {
       setReservations((current) => current.map((item) => item.reservation_id === reservation.reservation_id ? { ...item, status: 'cancelled' } : item));
       setNotice(`Cancellation returned ${result.status} · ${reservation.reservation_id}`);
@@ -215,7 +259,7 @@ function App() {
     const total = Math.max(2, Math.min(250, Number(burstSize) || 30));
     setBusy(true);
     setNotice(`Sending ${total} concurrent users to ${target}...`);
-    const results = await Promise.all(Array.from({ length: total }, (_, index) => reserve([target], `hot-${crypto.randomUUID()}`, `hot-user-${index}-${crypto.randomUUID()}`, false)));
+    const results = await Promise.all(Array.from({ length: total }, () => reserve([target], `hot-${crypto.randomUUID()}`, false)));
     const created = results.filter((result) => result?.status === 201).length;
     const conflicts = results.filter((result) => result?.status === 409).length;
     const unexpected = results.filter((result) => !result || (result.status !== 201 && result.status !== 409)).length;
@@ -228,10 +272,9 @@ function App() {
     const open = show?.seats.filter((seat) => seat.status.toLowerCase() === 'available') ?? [];
     const total = Math.min(10, open.length);
     if (total < 2) return setNotice('Need at least two available seats for the per-user race.');
-    const sharedUser = `limit-user-${crypto.randomUUID()}`;
     setBusy(true);
-    setNotice(`Sending ${total} concurrent seat requests as ${sharedUser}...`);
-    const results = await Promise.all(open.slice(0, total).map((seat, index) => reserve([seat.seat], `limit-${index}-${crypto.randomUUID()}`, sharedUser, false)));
+    setNotice(`Sending ${total} concurrent seat requests as ${session?.userId}...`);
+    const results = await Promise.all(open.slice(0, total).map((seat, index) => reserve([seat.seat], `limit-${index}-${crypto.randomUUID()}`, false)));
     const created = results.filter((result) => result?.status === 201).length;
     const conflicts = results.filter((result) => result?.status === 409).length;
     await refreshShow();
@@ -244,10 +287,9 @@ function App() {
     if (!target) return setNotice('No available seat to use for the idempotency race.');
     const total = Math.max(2, Math.min(100, Number(burstSize) || 10));
     const sharedKey = newKey();
-    const sharedUser = `idem-user-${crypto.randomUUID()}`;
     setBusy(true);
     setNotice(`Sending ${total} identical requests with one idempotency key...`);
-    const results = await Promise.all(Array.from({ length: total }, () => reserve([target], sharedKey, sharedUser, false)));
+    const results = await Promise.all(Array.from({ length: total }, () => reserve([target], sharedKey, false)));
     const created = results.filter((result) => result?.status === 201).length;
     const replayed = results.filter((result) => result?.status === 200).length;
     const ids = results.map((result) => (result?.data as Reservation | undefined)?.reservation_id).filter(Boolean);
@@ -260,12 +302,11 @@ function App() {
   async function runCancellationRace() {
     const active = reservations.find((reservation) => reservation.status.toLowerCase() === 'confirmed');
     if (!active) return setNotice('Create a reservation in this session first to run a cancellation race.');
-    const otherUser = `race-user-${crypto.randomUUID()}`;
     setBusy(true);
     setNotice(`Racing cancellation against a new reservation for ${active.seats.join(', ')}...`);
     const [cancelResult, reserveResult] = await Promise.all([
-      cancelReservation(active, active.user_id),
-      reserve(active.seats, newKey(), otherUser),
+      cancelReservation(active),
+      reserve(active.seats, newKey(), false),
     ]);
     const state = await refreshShow();
     const finalSeats = state?.seats.filter((seat) => active.seats.includes(seat.seat)) ?? [];
@@ -302,6 +343,28 @@ function App() {
   const reconciliation = show ? show.counts.available + show.counts.held + show.counts.confirmed === show.counts.total : null;
   const seatRows = show ? [...new Set(show.seats.map((seat) => seat.seat.match(/^[A-Za-z]+/)?.[0] ?? 'Other'))] : [];
 
+  if (!session) {
+    return (
+      <main className="login-shell">
+        <form className="login-panel" onSubmit={login}>
+          <div className="login-mark"><TicketCheck size={20} strokeWidth={2.3} /></div>
+          <span className="eyebrow">SEAT RESERVATION SERVICE</span>
+          <h1>Sign in<span className="title-dot">.</span></h1>
+          <p>Use an assessment account to open the reservation console.</p>
+          <div className="field"><label htmlFor="login-api-base">API BASE URL</label><input id="login-api-base" value={apiBase} onChange={(event) => saveApiBase(event.target.value)} placeholder="Blank uses this origin or local proxy" /></div>
+          <div className="field"><label htmlFor="login-username">USER ID</label><input id="login-username" autoComplete="username" value={loginUsername} onChange={(event) => setLoginUsername(event.target.value)} required /></div>
+          <div className="field"><label htmlFor="login-password">PASSWORD</label><input id="login-password" type="password" autoComplete="current-password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} required /></div>
+          {loginError && <div className="login-error" role="alert">{loginError}</div>}
+          <button className="button button-primary login-submit" type="submit" disabled={loginBusy}>
+            {loginBusy ? <LoaderCircle size={15} className="login-spinner" /> : <LockKeyhole size={15} />}
+            {loginBusy ? 'Signing in' : 'Sign in'}
+          </button>
+          <span className="login-footnote">Demo account IDs and passwords are listed in README.</span>
+        </form>
+      </main>
+    );
+  }
+
   return (
     <div className="app-shell">
       <aside className="rail">
@@ -323,6 +386,10 @@ function App() {
             <input id="api-base" value={apiBase} onChange={(event) => saveApiBase(event.target.value)} placeholder="Local proxy :8080" aria-label="API base URL" />
             <button className="icon-button" onClick={() => refreshShow()} title="Refresh show state" aria-label="Refresh show state"><RotateCw size={16} /></button>
           </div>
+          <div className="session-control">
+            <span className="session-badge">{session.userId} · {session.role}</span>
+            <button className="icon-button" onClick={logout} title="Sign out" aria-label="Sign out"><LogOut size={16} /></button>
+          </div>
         </header>
 
         <div className="workspace">
@@ -338,7 +405,7 @@ function App() {
                 <button className="button button-quiet load-button" onClick={() => refreshShow()}><ArrowDownToLine size={15} /> Load</button>
               </div>
 
-              <form onSubmit={createShow} className="create-form">
+              {session.role === 'ADMIN' ? <form onSubmit={createShow} className="create-form">
                 <div className="form-grid">
                   <div className="field"><label htmlFor="show-name">SHOW NAME</label><input id="show-name" value={showName} onChange={(event) => setShowName(event.target.value)} /></div>
                   <div className="field"><label htmlFor="price">PRICE · PAISE</label><input id="price" inputMode="numeric" type="number" min="0" value={pricePaise} onChange={(event) => setPricePaise(event.target.value)} /></div>
@@ -346,7 +413,7 @@ function App() {
                 </div>
                 <div className="field seat-definition"><label htmlFor="seat-definitions">SEAT INVENTORY <span>comma or space separated</span></label><textarea id="seat-definitions" rows={2} value={seatInput} onChange={(event) => setSeatInput(event.target.value)} /></div>
                 <button className="button button-primary" type="submit" disabled={busy}><Plus size={16} /> Create show</button>
-              </form>
+              </form> : <div className="role-notice">An admin account is required to create shows.</div>}
 
               <div className="show-summary">
                 <div><span className="eyebrow">ACTIVE SHOW</span><strong>{show?.name ?? 'Waiting for a show'}</strong><small>{show ? `${formatPaise(show.price_paise)} per seat · limit ${show.per_user_limit}` : 'Create one above, or load by ID.'}</small></div>
@@ -386,7 +453,7 @@ function App() {
                 <span className="method-tag">POST <b>/reserve</b></span>
               </div>
               <div className="form-grid request-grid">
-                <div className="field"><label htmlFor="user-id">BEARER USER TOKEN <span>blank to test 401</span></label><input id="user-id" value={userId} onChange={(event) => setUserId(event.target.value)} placeholder="user-01" /></div>
+                <div className="field"><label htmlFor="user-id">SIGNED-IN USER</label><input id="user-id" value={`${session.userId} · ${session.role}`} readOnly /></div>
                 <div className="field"><label htmlFor="idempotency-key">IDEMPOTENCY KEY</label><div className="input-with-action"><input id="idempotency-key" value={idempotencyKey} onChange={(event) => setIdempotencyKey(event.target.value)} /><button className="mini-action" onClick={() => setIdempotencyKey(newKey())} title="Generate a new key" aria-label="Generate a new key"><RotateCw size={14} /></button></div></div>
               </div>
               <div className="field request-seat-field"><label htmlFor="request-seats">REQUESTED SEATS <span>edit freely to probe unavailable or invalid seats</span></label><input id="request-seats" value={reserveSeatsInput} onChange={(event) => setReserveSeatsInput(event.target.value)} placeholder="A01, A02" /></div>
@@ -403,13 +470,13 @@ function App() {
               <p className="panel-copy">Each probe sends concurrent HTTP requests to the live service, then reloads the authoritative seat state.</p>
               <div className="burst-settings"><div className="field"><label htmlFor="burst-size">REQUEST COUNT</label><input id="burst-size" type="number" min="2" max="250" value={burstSize} onChange={(event) => setBurstSize(event.target.value)} /></div><span>Browser runner capped at 250 requests per race.</span></div>
               <div className="probe-grid">
-                <button className="probe-button" onClick={runHotSeatRace} disabled={busy || !show}><span className="probe-number">A</span><span><strong>Hot-seat contention</strong><small>Unique users · one seat · expect 1 win</small></span><ArrowRight size={15} /></button>
+                <button className="probe-button" onClick={runHotSeatRace} disabled={busy || !show}><span className="probe-number">A</span><span><strong>Hot-seat contention</strong><small>Signed-in account · one seat · expect 1 win</small></span><ArrowRight size={15} /></button>
                 <button className="probe-button" onClick={runUserLimitRace} disabled={busy || !show}><span className="probe-number">B</span><span><strong>Per-user limit</strong><small>One user · different seats · expect limit wins</small></span><ArrowRight size={15} /></button>
                 <button className="probe-button" onClick={runIdempotencyRace} disabled={busy || !show}><span className="probe-number">C</span><span><strong>Idempotency race</strong><small>Same user, key and body · expect one ID</small></span><ArrowRight size={15} /></button>
-                <button className="probe-button" onClick={runCancellationRace} disabled={busy || !show}><span className="probe-number">D</span><span><strong>Cancel + reserve race</strong><small>Competing ownership · verify final state</small></span><ArrowRight size={15} /></button>
+                <button className="probe-button" onClick={runCancellationRace} disabled={busy || !show}><span className="probe-number">D</span><span><strong>Cancel + reserve race</strong><small>Concurrent requests · verify final state</small></span><ArrowRight size={15} /></button>
               </div>
               {busy && <div className="busy-line"><LoaderCircle size={14} /> Running requests and syncing inventory…</div>}
-              <div className="manual-checks"><span>Manual probes</span><p>Select multiple seats and include an unavailable one to test all-or-nothing rollback. Retry a key with changed seats for <code>409 IDEMPOTENCY_KEY_REUSED</code>. Change the token before cancellation to test ownership.</p></div>
+              <div className="manual-checks"><span>Manual probes</span><p>Select multiple seats and include an unavailable one to test all-or-nothing rollback. Retry a key with changed seats for <code>409 IDEMPOTENCY_KEY_REUSED</code>. Sign in as another user to verify owner-only cancellation.</p></div>
             </section>
           </section>
 
@@ -422,7 +489,7 @@ function App() {
               <div className="health-actions">
                 <button onClick={() => checkHealth('/health/live')}><span className="health-icon live"><HeartPulse size={16} /></span><span><strong>Liveness</strong><small>/health/live</small></span><ArrowRight size={14} /></button>
                 <button onClick={() => checkHealth('/health/ready')}><span className="health-icon ready"><CheckCircle2 size={16} /></span><span><strong>Readiness</strong><small>/health/ready · DB ping</small></span><ArrowRight size={14} /></button>
-                <button onClick={loadMetrics}><span className="health-icon metrics-icon"><Activity size={16} /></span><span><strong>Prometheus metrics</strong><small>/metrics</small></span><ArrowRight size={14} /></button>
+                {session.role === 'ADMIN' ? <button onClick={loadMetrics}><span className="health-icon metrics-icon"><Activity size={16} /></span><span><strong>Prometheus metrics</strong><small>/metrics · admin only</small></span><ArrowRight size={14} /></button> : <div className="metrics-empty metrics-locked">Metrics require an admin account.</div>}
               </div>
               <div className="metrics-preview"><div className="list-heading">SELECTED SERIES <span>{metrics.length}</span></div>{metrics.length ? metrics.map((line, index) => <code key={`${line}-${index}`}>{line}</code>) : <div className="metrics-empty">Load metrics to inspect reservation counters, decline reasons and seat gauges.</div>}</div>
               {metrics.length > 0 && <div className="metric-note"><AlertTriangle size={13} /> Counters are process-local; compare with show state after a probe.</div>}
@@ -443,7 +510,7 @@ function App() {
             </section>
           </aside>
         </div>
-        <footer className="footer"><span>LOCAL TEST SURFACE</span><span><i /> Transaction-backed state · Integer paise · Request IDs enabled</span><a href="http://localhost:8080/health/live" target="_blank" rel="noreferrer">Service :8080 <ExternalLink size={12} /></a></footer>
+        <footer className="footer"><span>AUTHENTICATED TEST SURFACE</span><span><i /> JWT session · Transaction-backed state · Request IDs enabled</span><span>Health checks in diagnostics</span></footer>
       </main>
     </div>
   );

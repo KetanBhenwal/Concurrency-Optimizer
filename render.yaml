@@ -13,9 +13,8 @@ services:
         fromDatabase:
           name: seat-reservation-db
           property: connectionString
-      - key: ADMIN_TOKEN
+      - key: JWT_SECRET
         generateValue: true
-
 databases:
   - name: seat-reservation-db
     databaseName: seat_reservation

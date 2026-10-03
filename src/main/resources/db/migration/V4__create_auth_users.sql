@@ -1,0 +1,6 @@
+CREATE TABLE auth_users (
+    user_id VARCHAR(32) PRIMARY KEY,
+    password_hash VARCHAR(100) NOT NULL,
+    role VARCHAR(16) NOT NULL CHECK (role IN ('ADMIN', 'USER')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

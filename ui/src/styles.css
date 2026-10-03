@@ -26,6 +26,16 @@ button, input, textarea { font: inherit; }
 button { color: inherit; }
 button:focus-visible, input:focus-visible, textarea:focus-visible, a:focus-visible { outline: 2px solid var(--acid); outline-offset: 2px; }
 button:disabled { cursor: not-allowed; opacity: .48; }
+.login-shell { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: radial-gradient(ellipse at 50% 42%, #20291f 0, #111510 56%); }
+.login-panel { width: min(100%, 370px); padding: 30px; border: 1px solid #3a4336; border-radius: 8px; background: linear-gradient(150deg, #1d241c, #151a15 62%); box-shadow: 0 24px 80px #0006; animation: login-arrive .45s ease-out both; }
+.login-mark { width: 38px; height: 38px; display: grid; place-items: center; margin-bottom: 23px; border-radius: 9px 9px 9px 3px; color: #111510; background: var(--acid); }
+.login-panel h1 { margin: 7px 0 6px; font: 600 32px/1.05 Fraunces, Georgia, serif; }
+.login-panel > p { margin: 0 0 23px; color: #9ba497; font-size: 12px; line-height: 1.5; }
+.login-panel .field { margin-top: 15px; }
+.login-error { margin-top: 13px; color: var(--coral); font-size: 11px; }
+.login-submit { width: 100%; margin-top: 19px; }
+.login-spinner { animation: spin 1.15s linear infinite; }
+.login-footnote { display: block; margin-top: 15px; color: #778173; font-size: 10px; text-align: center; }
 .app-shell { min-height: 100vh; display: grid; grid-template-columns: 64px minmax(0, 1fr); background: radial-gradient(ellipse at 78% 4%, rgba(112, 211, 189, .055), transparent 33%), var(--canvas); }
 .rail { min-height: 100vh; display: flex; align-items: center; flex-direction: column; gap: 11px; padding: 18px 0; border-right: 1px solid #262d25; background: #0d110e; position: sticky; top: 0; height: 100vh; }
 .brand-mark { width: 35px; height: 35px; display: grid; place-items: center; color: #111510; background: var(--acid); border-radius: 10px 10px 10px 3px; }
@@ -44,6 +54,10 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .connection-control label { color: var(--muted); font: 10px var(--mono); }
 .connection-control input { width: 150px; border: 0; outline: 0; background: transparent; color: var(--text); font: 10px var(--mono); }
 .connection-control input::placeholder { color: #6a7468; }
+.session-control { display: flex; align-items: center; gap: 7px; }
+.session-badge { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--teal); font: 9px var(--mono); }
+.role-notice { padding: 13px 14px; border: 1px solid #3c4339; border-radius: 5px; color: #a4ada0; background: #141914; font-size: 11px; }
+.metrics-locked { padding: 8px 0 2px; }
 .icon-button, .copy-button { border: 0; background: transparent; color: var(--muted); cursor: pointer; display: grid; place-items: center; border-radius: 5px; }
 .icon-button { width: 28px; height: 28px; margin-left: auto; }
 .icon-button:hover, .copy-button:hover { background: #2a3129; color: var(--acid); }
@@ -201,6 +215,7 @@ code { font-family: var(--mono); }
 .footer i { width: 5px; height: 5px; }
 .footer a { display: inline-flex; align-items: center; gap: 5px; color: #9da796; text-decoration: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
+@keyframes login-arrive { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
 @media (max-width: 1050px) {
   .workspace { grid-template-columns: minmax(0, 1.2fr) minmax(290px, .8fr); padding: 20px 22px 26px; }
@@ -218,6 +233,8 @@ code { font-family: var(--mono); }
   .topbar-title h1 { font-size: 23px; }
   .connection-control { width: 100%; }
   .connection-control input { flex: 1; width: 0; }
+  .session-control { width: 100%; justify-content: space-between; }
+  .session-badge { max-width: none; }
   .workspace { grid-template-columns: minmax(0, 1fr); padding: 15px 12px 22px; gap: 13px; }
   .primary-column, .secondary-column { gap: 13px; }
   .panel, .diagnostics-panel, .response-panel { padding: 15px; }
@@ -225,6 +242,7 @@ code { font-family: var(--mono); }
   .footer > span:nth-child(2) { order: 3; width: 100%; }
 }
 @media (max-width: 430px) {
+  .login-panel { padding: 24px 20px; }
   .show-id-row { align-items: stretch; flex-direction: column; }
   .load-button { align-self: flex-start; }
   .form-grid, .request-grid { grid-template-columns: 1fr; }

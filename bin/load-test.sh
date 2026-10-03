@@ -11,7 +11,7 @@ if [[ "${1:-}" == "__request" ]]; then
     -o /dev/null \
     -w '%{http_code}\t%{time_total}' \
     -X POST "$BASE_URL/shows/$SHOW_ID/reserve" \
-    -H "Authorization: Bearer load-user-$request_number" \
+    -H "Authorization: Bearer $USER_TOKEN" \
     -H "Idempotency-Key: load-$request_number" \
     -H 'Content-Type: application/json' \
     -d '{"seats":["HOT"]}') || response=$'000\t0.000'
@@ -30,7 +30,6 @@ if [[ -z "$BASE_URL" ]]; then
   exit 2
 fi
 BASE_URL=${BASE_URL%/}
-ADMIN_TOKEN=${ADMIN_TOKEN:-local-admin-token}
 REQUESTS=${REQUESTS:-1000}
 CONCURRENCY=${CONCURRENCY:-100}
 REQUEST_TIMEOUT=${REQUEST_TIMEOUT:-30}
@@ -69,6 +68,16 @@ if ! curl --retry 5 --retry-all-errors --retry-delay 1 --retry-max-time 15 \
   printf 'Service did not become ready: %s\n' "$BASE_URL" >&2
   exit 1
 fi
+
+login() {
+  curl -fsS -X POST "$BASE_URL/auth/login" \
+    -H 'Content-Type: application/json' \
+    -d "$(jq -nc --arg username "$1" --arg password "$2" '{username:$username,password:$password}')" \
+    | jq -er '.access_token'
+}
+ADMIN_TOKEN=$(login "${ADMIN_USERNAME:-admin01}" "${ADMIN_PASSWORD:-SeatAdmin-2026!01}")
+USER_TOKEN=$(login "${USER_USERNAME:-user01}" "${USER_PASSWORD:-SeatUser-2026!01}")
+export USER_TOKEN
 
 show=$(curl -fsS -X POST "$BASE_URL/shows" \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
@@ -123,7 +132,7 @@ printf '  Latency p50:    %s s\n' "$p50"
 printf '  Latency p95:    %s s\n' "$p95"
 printf '  Latency max:    %s s\n' "$max_latency"
 
-state=$(curl -fsS "$BASE_URL/shows/$SHOW_ID")
+state=$(curl -fsS "$BASE_URL/shows/$SHOW_ID" -H "Authorization: Bearer $USER_TOKEN")
 printf '\nFinal seat counts\n'
 printf '%s\n' "$state" | jq '.counts'
 if ! printf '%s' "$state" | jq -e '

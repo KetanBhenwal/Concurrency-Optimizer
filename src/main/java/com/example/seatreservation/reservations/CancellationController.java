@@ -1,31 +1,27 @@
 package com.example.seatreservation.reservations;
 
-import com.example.seatreservation.auth.RequestAuth;
-import org.springframework.beans.factory.annotation.Value;
+import java.util.UUID;
+
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.util.UUID;
 
 @RestController
 @RequestMapping("/reservations")
 public class CancellationController {
     private final ReservationService reservationService;
-    private final String adminToken;
 
-    public CancellationController(ReservationService reservationService,
-                                  @Value("${reservation.admin-token}") String adminToken) {
+    public CancellationController(ReservationService reservationService) {
         this.reservationService = reservationService;
-        this.adminToken = adminToken;
     }
 
     @PostMapping("/{reservationId}/cancel")
     public CancellationResponse cancel(@PathVariable UUID reservationId,
-                                       @RequestHeader("Authorization") String authorization) {
-        String userId = RequestAuth.requireUser(authorization, adminToken);
+                                       @AuthenticationPrincipal Jwt jwt) {
+        String userId = jwt.getSubject();
         return reservationService.cancel(reservationId, userId);
     }
 
