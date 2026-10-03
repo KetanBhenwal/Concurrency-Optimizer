@@ -1,20 +1,17 @@
 package com.example.seatreservation.shows;
 
-import com.example.seatreservation.auth.RequestAuth;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
@@ -27,18 +24,14 @@ import java.util.UUID;
 @RequestMapping("/shows")
 public class ShowController {
     private final ShowService showService;
-    private final String adminToken;
 
-    public ShowController(ShowService showService, @Value("${reservation.admin-token}") String adminToken) {
+    public ShowController(ShowService showService) {
         this.showService = showService;
-        this.adminToken = adminToken;
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public ShowResponse create(@RequestHeader("Authorization") String authorization,
-                               @Valid @RequestBody CreateShowRequest request) {
-        RequestAuth.requireAdmin(authorization, adminToken);
+    public ShowResponse create(@Valid @RequestBody CreateShowRequest request) {
         return showService.create(request);
     }
 

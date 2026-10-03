@@ -24,13 +24,6 @@ public final class RequestAuth {
         return token;
     }
 
-    public static void requireAdmin(String authorization, String adminToken) {
-        String token = bearerToken(authorization);
-        if (!MessageDigest.isEqual(token.getBytes(StandardCharsets.UTF_8), adminToken.getBytes(StandardCharsets.UTF_8))) {
-            throw new DomainException(HttpStatus.FORBIDDEN, "FORBIDDEN", "Administrator access is required");
-        }
-    }
-
     private static String bearerToken(String authorization) {
         if (authorization == null || !authorization.startsWith("Bearer ")) {
             throw new DomainException(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED", "A bearer token is required");

@@ -63,7 +63,6 @@ function formatPaise(paise: number) {
 
 function App() {
   const [apiBase, setApiBase] = useState(localStorage.getItem('seat-ui-api') ?? '');
-  const [adminToken, setAdminToken] = useState('local-admin-token');
   const [userId, setUserId] = useState('user-01');
   const [showName, setShowName] = useState('Friday night');
   const [seatInput, setSeatInput] = useState(starterSeats);
@@ -154,7 +153,7 @@ function App() {
     setBusy(true);
     const result = await callApi('/shows', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: showName, seats, price_paise: Number(pricePaise), per_user_limit: Number(userLimit) }),
     });
     if (result.ok && typeof result.data === 'object' && result.data !== null && 'id' in result.data) {
@@ -342,7 +341,6 @@ function App() {
               <form onSubmit={createShow} className="create-form">
                 <div className="form-grid">
                   <div className="field"><label htmlFor="show-name">SHOW NAME</label><input id="show-name" value={showName} onChange={(event) => setShowName(event.target.value)} /></div>
-                  <div className="field"><label htmlFor="admin-token">ADMIN BEARER TOKEN</label><input id="admin-token" value={adminToken} onChange={(event) => setAdminToken(event.target.value)} /></div>
                   <div className="field"><label htmlFor="price">PRICE · PAISE</label><input id="price" inputMode="numeric" type="number" min="0" value={pricePaise} onChange={(event) => setPricePaise(event.target.value)} /></div>
                   <div className="field"><label htmlFor="limit">PER-USER LIMIT</label><input id="limit" inputMode="numeric" type="number" min="1" value={userLimit} onChange={(event) => setUserLimit(event.target.value)} /></div>
                 </div>
