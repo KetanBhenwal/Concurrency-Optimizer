@@ -1,0 +1,7 @@
+.env
+.env.*
+!.env.example
+target/
+*.log
+*.tsbuildinfo
+.DS_Store

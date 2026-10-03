@@ -99,6 +99,10 @@ REQUESTS=20000 CONCURRENCY=500 ./bin/load-test.sh http://localhost:8080
 
 The default is 1,000 requests at concurrency 100. The maximum request count is 20,000. Set `ADMIN_TOKEN` for non-local environments, `REQUEST_TIMEOUT` to change the per-request timeout, or `KEEP_RESULTS=1` to retain the raw status/latency results. This load test intentionally targets one seat; use `scripts/burst.sh` for the broader invariant suite.
 
+## Render Deployment
+
+The root `render.yaml` defines a Docker web service and private Postgres database. The Docker image builds the React UI into Spring Boot's static resources, so the API and UI share one origin. The Render service uses `/health/ready` as its deployment health check and generates `ADMIN_TOKEN` in Render. Free plans may sleep or have storage/time limits; verify the current Render plan restrictions before relying on the deployment for long-term persistence or high-volume tests.
+
 ## Configuration
 
 See `.env.example`. The main settings are `PORT`, `DATABASE_URL`, `DATABASE_USERNAME`, `DATABASE_PASSWORD`, and `ADMIN_TOKEN`. Flyway migrations live in `src/main/resources/db/migration` and are applied on application startup.
