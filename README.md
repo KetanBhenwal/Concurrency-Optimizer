@@ -33,7 +33,7 @@ Open the Vite URL (normally `http://localhost:5173`) and sign in with an account
 
 ## API Usage
 
-The hosted API URL is <https://seat-reservation-api-tv2k.onrender.com>. The JWT-enabled source in this checkout has been verified locally but has not been deployed to Render; do not treat the hosted revision as protected until it is redeployed. For the verified local instance, use `http://localhost:8080`. Anonymous access is limited to login, health checks, and the static UI; all business APIs require a signed JWT. Show creation and metrics are admin-only. Reservations and cancellations use the authenticated JWT subject as the user ID.
+The hosted API URL is <https://seat-reservation-api-tv2k.onrender.com>. On 2026-10-04, the hosted readiness endpoint returned `200`, login returned `200`, and an unauthenticated request to create a show returned `401`, confirming that authentication is active on the hosted service. These checks do not expose the deployed commit SHA, so they do not independently confirm that every commit on this branch is deployed. For the verified local instance, use `http://localhost:8080`. Anonymous access is limited to login, health checks, and the static UI; all business APIs require a signed JWT. Show creation and metrics are admin-only. Reservations and cancellations use the authenticated JWT subject as the user ID.
 
 ### Assessment Accounts
 

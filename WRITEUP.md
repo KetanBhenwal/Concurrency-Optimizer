@@ -90,7 +90,7 @@ The script verifies one winner for a hot seat, the same-user seat limit, simulta
 
 ## Trade-offs and Follow-up
 
-- The JWT-enabled source revision was validated locally but has not been deployed to Render; the hosted service may still run the previous public-write revision until it is released.
+- On 2026-10-04, the hosted readiness endpoint returned `200`, login returned `200`, and an unauthenticated show-creation request returned `401`, confirming that authentication is active on Render. The public endpoints do not expose the deployed commit SHA, so the exact hosted revision has not been independently verified.
 - Row locking favors correctness and simplicity; a single hot seat remains a throughput bottleneck.
 - The free Render database is temporary and expires on 2026-11-02; the live service is an assessment demo, not a durable production deployment.
 - Payment intent is not integrated. A real provider would need provider-side idempotency and a carefully defined transaction boundary.
